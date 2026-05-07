@@ -37,6 +37,12 @@ COPY server ./server
 # Copy built client into the place server.js expects (../client/dist)
 COPY --from=client-build /app/client/dist ./client/dist
 
+# ---------------------------------------------------------------------
+# Bake .env into the image (TESTING ONLY — insecure!)
+# server.js loads it from path.join(__dirname, '..', '.env'), i.e. /app/.env
+# ---------------------------------------------------------------------
+COPY .env ./.env
+
 ENV NODE_ENV=production
 # PORT can still be overridden via .env; this is just the default.
 ENV PORT=5000
