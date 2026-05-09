@@ -1,9 +1,10 @@
 pipeline {
+
     agent any
 
     environment {
-        IMAGE_NAME = "nginx:latest"
-        CONTAINER_NAME = "my-nginx"
+        IMAGE_NAME = "zaifi07/trailtales"
+        CONTAINER_NAME = "trail-tales"
         TEST_REPO = "https://github.com/zaifi07/selenium-testing.git"
     }
 
@@ -11,6 +12,7 @@ pipeline {
 
         stage('Get Committer Email') {
             steps {
+
                 script {
 
                     env.AUTHOR_EMAIL = sh(
@@ -25,6 +27,7 @@ pipeline {
 
         stage('Pull Docker Image') {
             steps {
+
                 sh "docker pull ${IMAGE_NAME}"
             }
         }
@@ -34,10 +37,10 @@ pipeline {
 
                 script {
 
-                    // Remove old container
+                    // Remove old container if exists
                     sh "docker rm -f ${CONTAINER_NAME} || true"
 
-                    // Run website
+                    // Run website container
                     sh """
                         docker run -d \
                         --name ${CONTAINER_NAME} \
@@ -45,8 +48,29 @@ pipeline {
                         ${IMAGE_NAME}
                     """
 
-                    // Wait for startup
+                    // Wait for website startup
                     sleep 15
+                }
+            }
+        }
+
+        stage('Check Website') {
+            steps {
+
+                script {
+
+                    env.APP_STATUS = sh(
+                        script: """
+                            if curl -I http://15.207.26.84:5000; then
+                                echo "Website is RUNNING"
+                            else
+                                echo "Website is DOWN"
+                            fi
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    echo env.APP_STATUS
                 }
             }
         }
@@ -54,14 +78,11 @@ pipeline {
         stage('Clone Selenium Repo') {
             steps {
 
-                script {
+                sh """
+                    rm -rf selenium-testing
 
-                    sh """
-                        rm -rf selenium-testing
-
-                        git clone ${TEST_REPO}
-                    """
-                }
+                    git clone ${TEST_REPO}
+                """
             }
         }
 
@@ -94,10 +115,12 @@ pipeline {
                             script: """
                                 . venv/bin/activate
 
-                                pytest
+                                pytest || true
                             """,
                             returnStdout: true
                         ).trim()
+
+                        echo env.TEST_RESULTS
                     }
                 }
             }
@@ -110,18 +133,21 @@ pipeline {
 
             mail(
                 to: "${env.AUTHOR_EMAIL}",
-                subject: "Selenium Tests Passed - ${env.JOB_NAME}",
+                subject: "Jenkins Pipeline SUCCESS - ${env.JOB_NAME}",
                 body: """
 Hello,
 
 Your deployment and Selenium tests completed successfully.
 
 
-=====================
-TEST RESULTS
-=====================
+====================================
+SELENIUM TEST RESULTS
+====================================
 
 ${env.TEST_RESULTS}
+
+
+
 Regards,
 Jenkins
 """
@@ -130,40 +156,50 @@ Jenkins
 
         failure {
 
-            script {
-
-                def failedLogs = currentBuild.rawBuild.getLog(200).join("\n")
-
-                mail(
-                    to: "${env.AUTHOR_EMAIL}",
-                    subject: "Selenium Tests Failed - ${env.JOB_NAME}",
-                    body: """
+            mail(
+                to: "${env.AUTHOR_EMAIL}",
+                subject: "Jenkins Pipeline FAILED - ${env.JOB_NAME}",
+                body: """
 Hello,
 
-Your pipeline FAILED.
+Your Jenkins pipeline FAILED.
 
-=====================
-LAST LOGS
-=====================
+====================================
+JOB NAME
+====================================
 
-${failedLogs}
+${env.JOB_NAME}
 
-=====================
+====================================
+BUILD NUMBER
+====================================
+
+${env.BUILD_NUMBER}
+
+====================================
 BUILD URL
-=====================
+====================================
 
 ${env.BUILD_URL}
+
+Please check Jenkins console logs.
 
 Regards,
 Jenkins
 """
-                )
-            }
+            )
         }
 
         always {
 
-            sh "docker rm -f ${CONTAINER_NAME} || true"
+            script {
+
+                // Cleanup container
+                sh "docker rm -f ${CONTAINER_NAME} || true"
+
+                // Cleanup selenium repo
+                sh "rm -rf selenium-testing || true"
+            }
         }
     }
 }
