@@ -20,7 +20,7 @@ pipeline {
                     ).trim()
 
                     def appStatus = sh(
-                        script: "curl -I http://localhost:3000",
+                        script: "curl -I http://15.207.26.84",
                         returnStdout: true
                     ).trim()
 
