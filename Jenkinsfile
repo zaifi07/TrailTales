@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "zaifi07/trailtales"
-        CONTAINER_NAME = "trail-tales"
+        IMAGE_NAME = "nginx:latest"
+        CONTAINER_NAME = "my-nginx"
+        TEST_REPO = "https://github.com/zaifi07/selenium-testing.git"
     }
 
     stages {
@@ -11,6 +12,7 @@ pipeline {
         stage('Get Committer Email') {
             steps {
                 script {
+
                     env.AUTHOR_EMAIL = sh(
                         script: "git log -1 --pretty=format:'%ae'",
                         returnStdout: true
@@ -27,17 +29,15 @@ pipeline {
             }
         }
 
-        stage('Run Container') {
+        stage('Run Website Container') {
             steps {
 
                 script {
 
-                    // Remove old container if exists
-                    sh """
-                        docker rm -f ${CONTAINER_NAME} || true
-                    """
+                    // Remove old container
+                    sh "docker rm -f ${CONTAINER_NAME} || true"
 
-                    // Run container
+                    // Run website
                     sh """
                         docker run -d \
                         --name ${CONTAINER_NAME} \
@@ -45,35 +45,60 @@ pipeline {
                         ${IMAGE_NAME}
                     """
 
-                    // Wait for container startup
-                    sleep 10
+                    // Wait for startup
+                    sleep 15
                 }
             }
         }
 
-        stage('Check Container') {
+        stage('Clone Selenium Repo') {
             steps {
 
                 script {
 
-                    def containerStatus = sh(
-                        script: "docker ps",
-                        returnStdout: true
-                    ).trim()
+                    sh """
+                        rm -rf selenium-testing
 
-                    def appStatus = sh(
-                        script: '''
-                            if curl -I http://15.207.26.84:5000; then
-                                echo "Application is RUNNING"
-                            else
-                                echo "Application is DOWN"
-                            fi
-                        ''',
-                        returnStdout: true
-                    ).trim()
+                        git clone ${TEST_REPO}
+                    """
+                }
+            }
+        }
 
-                    env.CONTAINER_STATUS = containerStatus
-                    env.APP_STATUS = appStatus
+        stage('Setup Python Environment') {
+            steps {
+
+                dir('selenium-testing') {
+
+                    sh """
+                        python3 -m venv venv
+
+                        . venv/bin/activate
+
+                        pip install -r requirements.txt
+
+                        cp .env.example .env
+                    """
+                }
+            }
+        }
+
+        stage('Run Selenium Tests') {
+            steps {
+
+                dir('selenium-testing') {
+
+                    script {
+
+                        env.TEST_RESULTS = sh(
+                            script: """
+                                . venv/bin/activate
+
+                                pytest
+                            """,
+                            returnStdout: true
+                        ).trim()
+                    }
                 }
             }
         }
@@ -85,33 +110,18 @@ pipeline {
 
             mail(
                 to: "${env.AUTHOR_EMAIL}",
-                subject: "Docker Deployment Success - ${env.JOB_NAME}",
+                subject: "Selenium Tests Passed - ${env.JOB_NAME}",
                 body: """
 Hello,
 
-Your Docker image was deployed successfully.
+Your deployment and Selenium tests completed successfully.
+
 
 =====================
-IMAGE
+TEST RESULTS
 =====================
 
-${IMAGE_NAME}
-
-=====================
-APPLICATION STATUS
-=====================
-
-${env.APP_STATUS}
-
-=====================
-RUNNING CONTAINERS
-=====================
-
-${env.CONTAINER_STATUS}
-
-Build URL:
-${env.BUILD_URL}
-
+${env.TEST_RESULTS}
 Regards,
 Jenkins
 """
@@ -120,21 +130,40 @@ Jenkins
 
         failure {
 
-            mail(
-                to: "${env.AUTHOR_EMAIL}",
-                subject: "Docker Deployment Failed - ${env.JOB_NAME}",
-                body: """
+            script {
+
+                def failedLogs = currentBuild.rawBuild.getLog(200).join("\n")
+
+                mail(
+                    to: "${env.AUTHOR_EMAIL}",
+                    subject: "Selenium Tests Failed - ${env.JOB_NAME}",
+                    body: """
 Hello,
 
-Your deployment pipeline FAILED.
+Your pipeline FAILED.
 
-Check Jenkins logs here:
+=====================
+LAST LOGS
+=====================
+
+${failedLogs}
+
+=====================
+BUILD URL
+=====================
+
 ${env.BUILD_URL}
 
 Regards,
 Jenkins
 """
-            )
+                )
+            }
+        }
+
+        always {
+
+            sh "docker rm -f ${CONTAINER_NAME} || true"
         }
     }
 }
