@@ -194,9 +194,6 @@ Jenkins
 
             script {
 
-                // Cleanup container
-                sh "docker rm -f ${CONTAINER_NAME} || true"
-
                 // Cleanup selenium repo
                 sh "rm -rf selenium-testing || true"
             }
